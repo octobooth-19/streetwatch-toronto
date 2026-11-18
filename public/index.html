@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en-CA">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>StreetWatch Toronto — road restrictions near you</title>
+  <meta name="description" content="Check Toronto road closures, construction, and restrictions before heading out. Data from the City of Toronto Open Data portal.">
+  <link rel="stylesheet" href="/styles.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#results">Skip to results</a>
+
+  <header class="site-header">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <div>
+        <h1>StreetWatch Toronto</h1>
+        <p class="tagline">Road closures and construction, before you head out</p>
+      </div>
+    </div>
+    <div class="freshness">
+      <p id="freshness-text" class="freshness-text">Loading City data…</p>
+      <button id="refresh" type="button" class="btn">Refresh</button>
+    </div>
+  </header>
+
+  <div id="banner" class="banner" role="alert" hidden></div>
+
+  <form id="filters" class="filters" role="search" aria-label="Filter disruptions">
+    <div class="field field-search">
+      <label for="q">Street</label>
+      <input id="q" name="q" type="search" placeholder="e.g. Queen St W, Bloor" autocomplete="off">
+    </div>
+    <div class="field">
+      <label for="time">When</label>
+      <select id="time" name="time">
+        <option value="now">Active now</option>
+        <option value="today">Today</option>
+        <option value="week">Next 7 days</option>
+        <option value="all">All dates</option>
+        <option value="unknown">Unknown timing</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="type">Type</label>
+      <select id="type" name="type"><option value="">All types</option></select>
+    </div>
+    <div class="field">
+      <label for="impact">Impact</label>
+      <select id="impact" name="impact"><option value="">All impacts</option></select>
+    </div>
+    <button type="reset" class="btn btn-quiet">Reset</button>
+  </form>
+
+  <div class="summary">
+    <p id="count" class="count" role="status" aria-live="polite"></p>
+    <div class="view-toggle" role="group" aria-label="View">
+      <button type="button" data-view="list" aria-pressed="true">List</button>
+      <button type="button" data-view="map" aria-pressed="false">Map</button>
+    </div>
+  </div>
+
+  <main class="layout" data-view="list">
+    <section id="results" class="results" aria-label="Results" tabindex="-1">
+      <ul id="list" class="list"></ul>
+      <p id="empty" class="empty" hidden></p>
+    </section>
+
+    <section class="map-pane" aria-label="Map">
+      <div id="map" class="map" tabindex="0" aria-label="Map of disruptions. Use arrow keys to pan and plus or minus to zoom. The list contains every result.">
+        <div class="map-controls">
+          <button type="button" id="zoom-in" class="map-btn" aria-label="Zoom in">+</button>
+          <button type="button" id="zoom-out" class="map-btn" aria-label="Zoom out">−</button>
+        </div>
+        <p class="map-attrib">© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors</p>
+      </div>
+      <p id="map-note" class="map-note"></p>
+    </section>
+
+    <aside id="details" class="details" aria-label="Selected disruption" hidden>
+      <button type="button" id="close-details" class="details-close" aria-label="Close details">×</button>
+      <div id="details-body"></div>
+    </aside>
+  </main>
+
+  <footer class="site-footer">
+    <p>
+      Contains information licensed under the
+      <a href="https://open.toronto.ca/open-data-license/" target="_blank" rel="noopener">Open Government Licence – Toronto</a>.
+      Source: <a href="https://open.toronto.ca/dataset/road-restrictions/" target="_blank" rel="noopener">Road Restrictions, City of Toronto Open Data</a>.
+    </p>
+    <p>
+      Not affiliated with or endorsed by the City of Toronto. Restrictions are reported by applicants and are not field-verified;
+      actual conditions may differ. “Active now” means the reported date range includes now, not that work is happening at this moment.
+    </p>
+  </footer>
+</body>
+</html>
