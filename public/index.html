@@ -2,21 +2,30 @@
 <html lang="en-CA">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>StreetWatch Toronto — road restrictions near you</title>
-  <meta name="description" content="Check Toronto road closures, construction, and restrictions before heading out. Data from the City of Toronto Open Data portal.">
-  <link rel="stylesheet" href="/styles.css">
-  <script type="module" src="/app.js"></script>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>StreetWatch Toronto — road closures and alerts for your streets</title>
+  <meta name="description" content="Live Toronto road closures and construction on a map. Follow your streets and get alerts when something changes. Built on City of Toronto Open Data.">
+  <meta name="theme-color" content="#1d3557">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" href="./icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="./apple-touch-icon.png">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="StreetWatch Toronto">
+  <meta property="og:description" content="Follow your streets and know about Toronto road closures before you leave home.">
+  <meta property="og:image" content="https://octobooth-19.github.io/streetwatch-toronto/og.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="stylesheet" href="./styles.css">
+  <script type="module" src="./app.js"></script>
 </head>
 <body>
-  <a class="skip-link" href="#results">Skip to results</a>
+  <a class="skip-link" href="#panel-results">Skip to results</a>
 
   <header class="site-header">
     <div class="brand">
       <span class="brand-mark" aria-hidden="true"></span>
       <div>
         <h1>StreetWatch Toronto</h1>
-        <p class="tagline">Road closures and construction, before you head out</p>
+        <p class="tagline">Follow your streets. Know before you go.</p>
       </div>
     </div>
     <div class="freshness">
@@ -27,7 +36,12 @@
 
   <div id="banner" class="banner" role="alert" hidden></div>
 
-  <form id="filters" class="filters" role="search" aria-label="Filter disruptions">
+  <section class="overview" aria-label="Snapshot of current restrictions">
+    <div id="chips" class="chips" role="group" aria-label="Quick views"></div>
+    <div id="week" class="week" role="group" aria-label="Restrictions by day, next seven days"></div>
+  </section>
+
+  <form id="filters" class="filters" role="search" aria-label="Filter restrictions">
     <div class="field field-search">
       <label for="q">Street</label>
       <input id="q" name="q" type="search" placeholder="e.g. Queen St W, Bloor" autocomplete="off">
@@ -50,11 +64,24 @@
       <label for="impact">Impact</label>
       <select id="impact" name="impact"><option value="">All impacts</option></select>
     </div>
+    <div class="field field-near">
+      <label for="near">Near me</label>
+      <div class="near-row">
+        <button type="button" id="near" class="btn btn-quiet" aria-pressed="false">Use my location</button>
+        <select id="radius" aria-label="Distance" hidden>
+          <option value="1">1 km</option>
+          <option value="2" selected>2 km</option>
+          <option value="5">5 km</option>
+          <option value="10">10 km</option>
+        </select>
+      </div>
+    </div>
     <button type="reset" class="btn btn-quiet">Reset</button>
   </form>
 
   <div class="summary">
     <p id="count" class="count" role="status" aria-live="polite"></p>
+    <button type="button" id="follow-query" class="btn btn-quiet follow-btn" hidden></button>
     <div class="view-toggle" role="group" aria-label="View">
       <button type="button" data-view="list" aria-pressed="true">List</button>
       <button type="button" data-view="map" aria-pressed="false">Map</button>
@@ -62,33 +89,130 @@
   </div>
 
   <main class="layout" data-view="list">
-    <section id="results" class="results" aria-label="Results" tabindex="-1">
-      <ul id="list" class="list"></ul>
-      <p id="empty" class="empty" hidden></p>
+    <section class="side" aria-label="Restrictions and alerts">
+      <div class="tabs" role="tablist" aria-label="Panels">
+        <button type="button" role="tab" id="tab-results" aria-controls="panel-results" aria-selected="true">Results</button>
+        <button type="button" role="tab" id="tab-saved" aria-controls="panel-saved" aria-selected="false" tabindex="-1">My streets<span id="saved-badge" class="tab-badge" hidden></span></button>
+        <button type="button" role="tab" id="tab-changes" aria-controls="panel-changes" aria-selected="false" tabindex="-1">Changes</button>
+      </div>
+
+      <div id="panel-results" class="panel" role="tabpanel" aria-labelledby="tab-results" tabindex="-1">
+        <ul id="list" class="list"></ul>
+        <p id="empty" class="empty" hidden></p>
+        <button type="button" id="more" class="btn btn-quiet more-btn" hidden></button>
+      </div>
+
+      <div id="panel-saved" class="panel" role="tabpanel" aria-labelledby="tab-saved" tabindex="-1" hidden>
+        <form id="add-street" class="add-street">
+          <label for="street-input">Follow a street</label>
+          <div class="row">
+            <input id="street-input" type="text" placeholder="e.g. Bloor St W" autocomplete="off" maxlength="60">
+            <button type="submit" class="btn">Follow</button>
+          </div>
+          <p id="add-msg" class="form-msg" role="status"></p>
+        </form>
+
+        <ul id="saved-list" class="saved-list"></ul>
+        <p id="saved-empty" class="empty">You are not following any streets yet. Type a street above, or search on the main page and choose Follow.</p>
+
+        <fieldset id="kinds" class="kinds">
+          <legend>Alert me when</legend>
+        </fieldset>
+
+        <section class="block" aria-labelledby="inbox-title">
+          <div class="block-head">
+            <h2 id="inbox-title">Updates</h2>
+            <button type="button" id="clear-inbox" class="btn btn-quiet btn-small" hidden>Clear</button>
+          </div>
+          <ul id="inbox-list" class="feed-list"></ul>
+          <p id="inbox-empty" class="hint">New, starting, escalated, ending and cleared restrictions on your streets appear here each time the City data updates.</p>
+        </section>
+
+        <section class="block" aria-labelledby="delivery-title">
+          <h2 id="delivery-title">Get alerts without opening the site</h2>
+
+          <div class="delivery-row">
+            <div>
+              <h3>Browser notifications</h3>
+              <p id="notify-hint" class="hint"></p>
+            </div>
+            <button type="button" id="notify-toggle" class="btn btn-quiet" aria-pressed="false">Turn on</button>
+          </div>
+
+          <div class="delivery-row">
+            <div>
+              <h3>Email me a summary</h3>
+              <p class="hint">Opens your email app with the latest status of your streets.</p>
+            </div>
+            <a id="digest" class="btn btn-quiet" href="mailto:">Write email</a>
+          </div>
+
+          <div id="feeds" class="feeds" hidden>
+            <h3>Feeds for email or SMS services</h3>
+            <p class="hint">Paste a street feed into a feed-to-email service to get a message when it changes.</p>
+            <ul id="feed-list" class="feed-links"></ul>
+          </div>
+
+          <form id="sub-form" class="sub-form" novalidate hidden>
+            <h3>Email or text message alerts</h3>
+            <p id="sub-status" class="hint"></p>
+            <fieldset class="channel">
+              <legend class="sr-only">Delivery channel</legend>
+              <label><input type="radio" name="channel" value="email" checked> Email</label>
+              <label><input type="radio" name="channel" value="sms"> Text message</label>
+            </fieldset>
+            <label for="sub-address" id="sub-address-label">Email address</label>
+            <input id="sub-address" name="address" type="email" autocomplete="email" required>
+            <label class="check"><input type="checkbox" id="sub-consent"><span>I agree to receive alerts about the streets I follow. I can stop them at any time. Message and data rates may apply.</span></label>
+            <button class="btn" type="submit" id="sub-submit">Send verification code</button>
+            <p id="sub-msg" class="form-msg" role="status"></p>
+          </form>
+          <form id="code-form" class="sub-form" novalidate hidden>
+            <label for="sub-code">6-digit verification code</label>
+            <input id="sub-code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}">
+            <button class="btn" type="submit">Confirm</button>
+            <p id="code-msg" class="form-msg" role="status"></p>
+          </form>
+          <p id="static-note" class="hint" hidden></p>
+        </section>
+      </div>
+
+      <div id="panel-changes" class="panel" role="tabpanel" aria-labelledby="tab-changes" tabindex="-1" hidden>
+        <div class="panel-head">
+          <p id="changes-summary" class="hint"></p>
+          <label class="check"><input type="checkbox" id="changes-mine"><span>Only my streets</span></label>
+        </div>
+        <ul id="changes-list" class="feed-list"></ul>
+        <p id="changes-empty" class="empty" hidden></p>
+      </div>
     </section>
 
     <section class="map-pane" aria-label="Map">
-      <div id="map" class="map" tabindex="0" aria-label="Map of disruptions. Use arrow keys to pan and plus or minus to zoom. The list contains every result.">
+      <div id="map" class="map" tabindex="0" aria-label="Map of restrictions. Use arrow keys to pan and plus or minus to zoom. The list contains every result.">
         <div class="map-controls">
           <button type="button" id="zoom-in" class="map-btn" aria-label="Zoom in">+</button>
           <button type="button" id="zoom-out" class="map-btn" aria-label="Zoom out">−</button>
+          <button type="button" id="zoom-fit" class="map-btn map-btn-text" aria-label="Fit map to results">Fit</button>
         </div>
         <p class="map-attrib">© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors</p>
       </div>
       <p id="map-note" class="map-note"></p>
     </section>
 
-    <aside id="details" class="details" aria-label="Selected disruption" hidden>
+    <aside id="details" class="details" aria-label="Selected restriction" hidden>
       <button type="button" id="close-details" class="details-close" aria-label="Close details">×</button>
       <div id="details-body"></div>
     </aside>
   </main>
 
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
   <footer class="site-footer">
     <p>
-      Contains information licensed under the
+      Built by Chris, Dave &amp; Chris. Contains information licensed under the
       <a href="https://open.toronto.ca/open-data-license/" target="_blank" rel="noopener">Open Government Licence – Toronto</a>.
       Source: <a href="https://open.toronto.ca/dataset/road-restrictions/" target="_blank" rel="noopener">Road Restrictions, City of Toronto Open Data</a>.
+      <a href="https://github.com/octobooth-19/streetwatch-toronto" target="_blank" rel="noopener">Source code</a>.
     </p>
     <p>
       Not affiliated with or endorsed by the City of Toronto. Restrictions are reported by applicants and are not field-verified;

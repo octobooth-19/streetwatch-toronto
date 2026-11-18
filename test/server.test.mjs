@@ -79,3 +79,85 @@ test('API returns 502 when unavailable, 200 with records otherwise; unknown path
   assert.equal((await run({ get: async () => ({}) }, '/../server.mjs')).status, 404);
   assert.equal((await run({ get: async () => ({}) }, '/')).status, 200);
 });
+
+import { createStore, createNotifier } from '../lib/notifier.mjs';
+import { createChangeTracker } from '../lib/changes.mjs';
+
+async function withServer(options, fn) {
+  const server = createServer(createHandler(options)).listen(0);
+  await new Promise((r) => server.once('listening', r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  try { return await fn(base); } finally { server.close(); }
+}
+
+const post = (base, path, body, headers = { 'Content-Type': 'application/json' }) =>
+  fetch(`${base}${path}`, { method: 'POST', headers, body: typeof body === 'string' ? body : JSON.stringify(body) });
+
+test('serves only allow-listed static files and shared modules', async () => {
+  await withServer({ cache: { get: async () => ({}) } }, async (base) => {
+    for (const [path, status] of [
+      ['/lib/disruptions.mjs', 200], ['/lib/alerts.mjs', 200], ['/lib/notifier.mjs', 404], ['/lib/..%2fserver.mjs', 404],
+      ['/server.mjs', 404], ['/package.json', 404], ['/%2e%2e/server.mjs', 404], ['/styles.css', 200], ['/app.js', 200],
+    ]) assert.equal((await fetch(`${base}${path}`)).status, status, path);
+    const res = await fetch(`${base}/`);
+    assert.match(res.headers.get('content-security-policy'), /default-src 'self'/);
+    assert.equal(res.headers.get('x-content-type-options'), 'nosniff');
+  });
+});
+
+test('config reports notification availability; change log is served', async () => {
+  const changes = createChangeTracker();
+  changes.update([{ id: '1', maxImpact: 'Low' }], 1000);
+  changes.update([{ id: '1', maxImpact: 'High' }, { id: '2', maxImpact: 'Low' }], 2000);
+  await withServer({ cache: { get: async () => ({}) }, changes }, async (base) => {
+    assert.deepEqual((await (await fetch(`${base}/config.json`)).json()).notifications, { email: 'unavailable', sms: 'unavailable' });
+    const log = await (await fetch(`${base}/data/changes.json`)).json();
+    assert.deepEqual(log.events.map((e) => e.kind).sort(), ['escalated', 'new']);
+    assert.equal((await post(base, '/api/subscriptions', {})).status, 503);
+  });
+});
+
+test('subscription API: validation, content type, body limit, confirm and unsubscribe', async () => {
+  const sent = [];
+  const providers = {
+    email: { mode: 'demo', send: async (m) => sent.push(m) },
+    sms: { mode: 'demo', send: async (m) => sent.push(m) },
+  };
+  const notifier = createNotifier({ store: createStore(), providers, siteUrl: 'https://x.test', log: () => {} });
+  await withServer({ cache: { get: async () => ({}) }, notifier }, async (base) => {
+    assert.deepEqual((await (await fetch(`${base}/config.json`)).json()).notifications, { email: 'demo', sms: 'demo' });
+    const valid = { channel: 'email', address: 'a@example.com', consent: true, streets: [{ query: 'Queen St W' }], kinds: ['new'] };
+
+    assert.equal((await post(base, '/api/subscriptions', valid, { 'Content-Type': 'text/plain' })).status, 415);
+    assert.equal((await post(base, '/api/subscriptions', '{oops')).status, 400);
+    assert.equal((await post(base, '/api/subscriptions', { ...valid, consent: false })).status, 400);
+    assert.equal((await post(base, '/api/subscriptions', 'x'.repeat(5000))).status, 413);
+    assert.equal(sent.length, 0);
+
+    const created = await post(base, '/api/subscriptions', valid);
+    assert.equal(created.status, 201);
+    const { id, demoCode } = await created.json();
+    assert.equal((await post(base, '/api/subscriptions/confirm', { id, code: '999999' })).status, 400);
+    const confirmed = await post(base, '/api/subscriptions/confirm', { id, code: demoCode });
+    assert.equal(confirmed.status, 200);
+    const { token } = await confirmed.json();
+
+    const page = await fetch(`${base}/unsubscribe?token=${token}"><script>`);
+    assert.equal(page.status, 200);
+    assert.doesNotMatch(await page.text(), /<script>/);
+    const done = await post(base, '/unsubscribe', `token=${token}`, { 'Content-Type': 'application/x-www-form-urlencoded' });
+    assert.match(await done.text(), /Alerts stopped/);
+    assert.equal(notifier.activeCount(), 0);
+  });
+});
+
+test('CORS is only enabled for the configured origin', async () => {
+  await withServer({ cache: { get: async () => ({}) }, allowedOrigin: 'https://app.example' }, async (base) => {
+    const pre = await fetch(`${base}/api/subscriptions`, { method: 'OPTIONS' });
+    assert.equal(pre.status, 204);
+    assert.equal(pre.headers.get('access-control-allow-origin'), 'https://app.example');
+  });
+  await withServer({ cache: { get: async () => ({}) }, allowedOrigin: '' }, async (base) => {
+    assert.equal((await fetch(`${base}/config.json`)).headers.get('access-control-allow-origin'), null);
+  });
+});

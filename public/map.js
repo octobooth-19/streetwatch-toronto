@@ -4,6 +4,9 @@ const TILE_SIZE = 256;
 const TILE_URL = (z, x, y) => `https://tile.openstreetmap.org/${z}/${x}/${y}.png`;
 const MIN_ZOOM = 10;
 const MAX_ZOOM = 18;
+const CLUSTER_BELOW_ZOOM = 15;
+const CLUSTER_CELL = 52;
+const IMPACT_RANK = { High: 3, Medium: 2, Low: 1 };
 const BOUNDS = { minLat: 43.55, maxLat: 43.88, minLon: -79.65, maxLon: -79.1 };
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
@@ -34,6 +37,7 @@ export class TileMap {
     this.center = { lat: 43.7, lon: -79.39 };
     this.records = [];
     this.selectedId = null;
+    this.user = null;
     this.tileErrors = 0;
 
     this.tiles = document.createElement('div');
@@ -61,6 +65,35 @@ export class TileMap {
       this.center = { lat: r.lat, lon: r.lon };
       if (this.zoom < 14) this.zoom = 15;
     }
+    this.render();
+  }
+
+  setUser(point) {
+    this.user = point;
+    this.render();
+  }
+
+  /** Frames the given records, or the whole city when there are none. */
+  fit(records) {
+    const pts = records.filter((r) => r.lat !== null);
+    const { w, h } = this.#size();
+    if (!pts.length || !w || !h) {
+      this.center = { lat: 43.7, lon: -79.39 };
+      this.zoom = 12;
+      this.render();
+      return;
+    }
+    const lats = pts.map((r) => r.lat);
+    const lons = pts.map((r) => r.lon);
+    const box = { n: Math.max(...lats), s: Math.min(...lats), e: Math.max(...lons), w: Math.min(...lons) };
+    let z = 16;
+    for (; z > MIN_ZOOM; z--) {
+      const a = project(box.n, box.w, z);
+      const b = project(box.s, box.e, z);
+      if (b.x - a.x <= w - 90 && b.y - a.y <= h - 90) break;
+    }
+    this.zoom = z;
+    this.center = { lat: (box.n + box.s) / 2, lon: (box.e + box.w) / 2 };
     this.render();
   }
 
@@ -142,27 +175,57 @@ export class TileMap {
       img.style.transform = `translate(${tx * TILE_SIZE - ox}px, ${ty * TILE_SIZE - oy}px)`;
     }
 
-    // Markers: only those within the viewport (plus margin).
+    // Markers: only those in the viewport; nearby ones merge into clusters when zoomed out.
     this.markers.replaceChildren();
     const frag = document.createDocumentFragment();
+    const cells = new Map();
     let selectedEl = null;
+    const clustering = z < CLUSTER_BELOW_ZOOM;
     for (const r of this.records) {
       const p = project(r.lat, r.lon, z);
       const x = p.x - ox;
       const y = p.y - oy;
-      if (x < -20 || y < -20 || x > w + 20 || y > h + 20) continue;
+      if (x < -30 || y < -30 || x > w + 30 || y > h + 30) continue;
+      if (clustering && r.id !== this.selectedId) {
+        const key = `${Math.floor(x / CLUSTER_CELL)}:${Math.floor(y / CLUSTER_CELL)}`;
+        const cell = cells.get(key);
+        if (cell) cell.push({ r, x, y });
+        else cells.set(key, [{ r, x, y }]);
+        continue;
+      }
+      const m = this.#marker(r, x, y);
+      if (r.id === this.selectedId) selectedEl = m;
+      else frag.append(m);
+    }
+    for (const group of cells.values()) {
+      if (group.length === 1) { frag.append(this.#marker(group[0].r, group[0].x, group[0].y)); continue; }
+      const x = group.reduce((sum, g) => sum + g.x, 0) / group.length;
+      const y = group.reduce((sum, g) => sum + g.y, 0) / group.length;
+      const worst = group.reduce((a, g) => ((IMPACT_RANK[g.r.maxImpact] ?? 0) > (IMPACT_RANK[a] ?? 0) ? g.r.maxImpact : a), 'Unknown');
+      const ll = unproject(x + ox, y + oy, z);
       const b = document.createElement('button');
       b.type = 'button';
-      b.className = `marker impact-${r.maxImpact.toLowerCase()}`;
+      b.className = `cluster impact-${worst.toLowerCase()}`;
+      b.textContent = group.length > 999 ? '999+' : String(group.length);
       b.style.transform = `translate(${x}px, ${y}px)`;
-      b.tabIndex = -1; // The list is the keyboard path; avoid hundreds of tab stops.
-      b.setAttribute('aria-label', `${r.name ?? r.road ?? 'Disruption'} (${r.maxImpact} impact)`);
-      b.dataset.id = r.id;
-      if (r.id === this.selectedId) { b.classList.add('selected'); selectedEl = b; }
+      b.tabIndex = -1;
+      b.setAttribute('aria-label', `${group.length} restrictions, highest impact ${worst}. Zoom in.`);
+      b.dataset.lat = String(ll.lat);
+      b.dataset.lon = String(ll.lon);
       frag.append(b);
     }
     this.markers.append(frag);
     if (selectedEl) this.markers.append(selectedEl); // draw on top
+
+    if (this.user) {
+      const p = project(this.user.lat, this.user.lon, z);
+      const dot = document.createElement('span');
+      dot.className = 'user-dot';
+      dot.setAttribute('role', 'img');
+      dot.setAttribute('aria-label', 'Your location');
+      dot.style.transform = `translate(${p.x - ox}px, ${p.y - oy}px)`;
+      this.markers.append(dot);
+    }
 
     // Selected segment line.
     this.svg.replaceChildren();
@@ -179,11 +242,31 @@ export class TileMap {
     }
   }
 
+  #marker(r, x, y) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = `marker impact-${r.maxImpact.toLowerCase()}`;
+    b.style.transform = `translate(${x}px, ${y}px)`;
+    b.tabIndex = -1; // The list is the keyboard path; avoid hundreds of tab stops.
+    b.setAttribute('aria-label', `${r.name ?? r.road ?? 'Restriction'} (${r.maxImpact} impact)`);
+    b.dataset.id = r.id;
+    if (r.id === this.selectedId) b.classList.add('selected');
+    return b;
+  }
+
   #bindInput() {
     const el = this.el;
     el.addEventListener('click', (e) => {
+      if (this.dragged) return;
+      const cluster = e.target.closest('.cluster');
+      if (cluster) {
+        this.center = { lat: Number(cluster.dataset.lat), lon: Number(cluster.dataset.lon) };
+        this.zoom = Math.min(MAX_ZOOM, this.zoom + 2);
+        this.render();
+        return;
+      }
       const b = e.target.closest('.marker');
-      if (b && !this.dragged) this.onSelect?.(b.dataset.id);
+      if (b) this.onSelect?.(b.dataset.id);
     });
 
     const pointers = new Map();
@@ -192,7 +275,6 @@ export class TileMap {
     el.addEventListener('pointerdown', (e) => {
       if (e.target.closest('.map-controls')) return;
       pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-      el.setPointerCapture?.(e.pointerId);
       last = { x: e.clientX, y: e.clientY };
       this.dragged = false;
     });
@@ -212,7 +294,11 @@ export class TileMap {
       }
       const dx = e.clientX - last.x;
       const dy = e.clientY - last.y;
-      if (Math.abs(dx) + Math.abs(dy) > 3) this.dragged = true;
+      if (!this.dragged && Math.abs(dx) + Math.abs(dy) > 3) {
+        this.dragged = true;
+        // Capture only once a drag begins, otherwise taps on markers are retargeted to the map.
+        el.setPointerCapture?.(e.pointerId);
+      }
       if (this.dragged) {
         this.panBy(-dx, -dy);
         last = { x: e.clientX, y: e.clientY };

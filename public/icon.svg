@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="StreetWatch Toronto">
+  <defs>
+    <pattern id="haz" width="64" height="64" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <rect width="64" height="64" fill="#f2a900"/>
+      <rect width="32" height="64" fill="#17202a"/>
+    </pattern>
+    <clipPath id="bar"><rect x="76" y="296" width="360" height="92" rx="20"/></clipPath>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="#1d3557"/>
+  <path d="M96 232 C 176 120, 336 120, 416 232" fill="none" stroke="#ffffff" stroke-width="40" stroke-linecap="round"/>
+  <circle cx="256" cy="148" r="30" fill="#f2a900"/>
+  <g clip-path="url(#bar)"><rect x="76" y="296" width="360" height="92" fill="url(#haz)"/></g>
+  <rect x="76" y="296" width="360" height="92" rx="20" fill="none" stroke="#ffffff" stroke-width="12"/>
+  <rect x="132" y="388" width="28" height="60" rx="8" fill="#ffffff"/>
+  <rect x="352" y="388" width="28" height="60" rx="8" fill="#ffffff"/>
+</svg>
